@@ -1,0 +1,6 @@
+rumps>=0.4.0
+pyaudio>=0.2.13
+openai>=1.0.0
+pynput>=1.7.6
+pyperclip>=1.8.2
+py2app>=0.28.0

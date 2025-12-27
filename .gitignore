@@ -1,0 +1,29 @@
+# Virtual environment
+venv/
+
+# Build artifacts
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# macOS
+.DS_Store
+
+# Config (contains user settings)
+# Note: config.json in ~/Library/Application Support/ is not in repo
+
+# Temp files
+*.tmp
+*.temp
