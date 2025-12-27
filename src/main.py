@@ -4,9 +4,9 @@ import logging
 import os
 import sys
 
-from .app import WhisperDictationApp
-from .config import ConfigManager
-from .constants import APP_NAME
+from src.app import WhisperDictationApp
+from src.config import ConfigManager
+from src.constants import APP_NAME
 
 
 def setup_logging() -> None:

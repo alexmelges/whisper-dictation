@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+import sys
 import threading
 from pathlib import Path
 
@@ -20,7 +21,24 @@ logger = logging.getLogger(__name__)
 MAX_RECENT_DISPLAY_LENGTH = 50
 
 # Get the resources directory path
-_RESOURCES_DIR = Path(__file__).parent.parent / "resources"
+# Handle both development and bundled app contexts
+def _get_resources_dir() -> Path:
+    """Get the resources directory, handling both dev and bundled app."""
+    # Check if running as a bundled py2app application
+    if hasattr(sys, '_MEIPASS'):  # PyInstaller
+        return Path(sys._MEIPASS) / "resources"
+
+    # For py2app, check if we're in a .app bundle
+    app_path = Path(__file__).resolve()
+    if ".app/Contents/Resources" in str(app_path):
+        # We're in a bundled app - resources are at Contents/Resources/resources
+        parts = str(app_path).split(".app/Contents/Resources")
+        return Path(parts[0] + ".app/Contents/Resources/resources")
+
+    # Development mode - resources relative to src/
+    return Path(__file__).parent.parent / "resources"
+
+_RESOURCES_DIR = _get_resources_dir()
 
 
 def _get_icon_path(name: str) -> str:

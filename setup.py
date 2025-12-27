@@ -22,6 +22,7 @@ DATA_FILES = [
 # py2app options
 OPTIONS = {
     "argv_emulation": False,
+    "strip": False,  # Don't strip binaries - breaks code signatures
     "iconfile": "resources/app_icon.icns",
     "plist": {
         # App identification
@@ -56,6 +57,12 @@ OPTIONS = {
         "httpcore",
         "anyio",
         "certifi",
+    ],
+    # Frameworks/dylibs to include
+    "frameworks": [
+        "/opt/homebrew/Caskroom/miniconda/base/lib/libffi.8.dylib",
+        "/opt/homebrew/Caskroom/miniconda/base/lib/libssl.3.dylib",
+        "/opt/homebrew/Caskroom/miniconda/base/lib/libcrypto.3.dylib",
     ],
     # Additional includes
     "includes": [
