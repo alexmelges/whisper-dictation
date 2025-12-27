@@ -29,7 +29,7 @@ brew install portaudio
 ### 2. Clone and Set Up
 
 ```bash
-git clone <repository-url>
+git clone https://github.com/alexmelges/whisper-dictation.git
 cd whisper-dictation
 
 # Create virtual environment
