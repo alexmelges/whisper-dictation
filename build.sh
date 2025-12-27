@@ -4,6 +4,7 @@
 #
 # Usage:
 #   ./build.sh          # Build the app
+#   ./build.sh install  # Build and install to Applications
 #   ./build.sh clean    # Clean build artifacts
 #
 set -e
@@ -75,6 +76,35 @@ python setup.py py2app
 echo_info "Signing the app..."
 xattr -cr "dist/Whisper Dictation.app"
 codesign --force --deep --sign - "dist/Whisper Dictation.app"
+
+# Handle install command
+if [ "$1" = "install" ]; then
+    echo_info "Installing to Applications..."
+    rm -rf "/Applications/Whisper Dictation.app"
+    cp -r "dist/Whisper Dictation.app" /Applications/
+    codesign --force --deep --sign - "/Applications/Whisper Dictation.app"
+    echo ""
+    echo "========================================"
+    echo -e "${GREEN}Installation complete!${NC}"
+    echo "========================================"
+    echo ""
+    echo "To run the app:"
+    echo "  open '/Applications/Whisper Dictation.app'"
+    echo ""
+    echo "Or click the app icon in your Applications folder."
+    echo ""
+    echo "========================================"
+    echo "IMPORTANT: First-time setup"
+    echo "========================================"
+    echo "1. Set your OpenAI API key:"
+    echo "   export OPENAI_API_KEY='your-api-key-here'"
+    echo ""
+    echo "2. Grant permissions when prompted:"
+    echo "   - Microphone access (for recording)"
+    echo "   - Accessibility (for global hotkeys)"
+    echo ""
+    exit 0
+fi
 
 echo ""
 echo "========================================"
