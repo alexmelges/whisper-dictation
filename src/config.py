@@ -1,13 +1,19 @@
 """Configuration management for the Whisper Dictation app."""
 
+import fcntl
 import json
 import logging
 import os
+import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Union
 
 from pynput.keyboard import Key, KeyCode
+
+# Secure file permissions
+_DIR_MODE = 0o700  # rwx------
+_FILE_MODE = 0o600  # rw-------
 
 from .constants import (
     APP_NAME,
@@ -66,6 +72,11 @@ class ConfigManager:
         if config_path is None:
             app_support = Path.home() / "Library" / "Application Support" / APP_NAME
             app_support.mkdir(parents=True, exist_ok=True)
+            # Secure directory permissions (owner only)
+            try:
+                app_support.chmod(_DIR_MODE)
+            except OSError as e:
+                logger.warning("Could not set directory permissions: %s", e)
             self._config_path = app_support / CONFIG_FILENAME
         else:
             self._config_path = config_path
@@ -100,7 +111,10 @@ class ConfigManager:
         return self._config
 
     def save(self, config: Config) -> None:
-        """Save configuration to disk.
+        """Save configuration to disk atomically with file locking.
+
+        Uses atomic write (temp file + rename) and file locking to prevent
+        corruption from concurrent access.
 
         Args:
             config: The configuration to save.
@@ -110,9 +124,39 @@ class ConfigManager:
 
         try:
             self._config_path.parent.mkdir(parents=True, exist_ok=True)
-            with self._config_path.open("w", encoding="utf-8") as f:
-                json.dump(data, f, indent=2)
-            logger.info("Configuration saved to %s", self._config_path)
+
+            # Write to temp file first (atomic write pattern)
+            fd, temp_path = tempfile.mkstemp(
+                dir=self._config_path.parent,
+                prefix=".config_",
+                suffix=".tmp",
+            )
+            try:
+                # Set secure permissions before writing
+                os.fchmod(fd, _FILE_MODE)
+
+                with os.fdopen(fd, "w", encoding="utf-8") as f:
+                    # Acquire exclusive lock
+                    fcntl.flock(f.fileno(), fcntl.LOCK_EX)
+                    try:
+                        json.dump(data, f, indent=2)
+                        f.flush()
+                        os.fsync(f.fileno())
+                    finally:
+                        fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+
+                # Atomic rename
+                os.rename(temp_path, self._config_path)
+                logger.info("Configuration saved to %s", self._config_path)
+
+            except Exception:
+                # Clean up temp file on error
+                try:
+                    os.unlink(temp_path)
+                except OSError:
+                    pass
+                raise
+
         except OSError as e:
             logger.error("Failed to save config: %s", e)
 

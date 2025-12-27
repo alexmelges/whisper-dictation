@@ -69,7 +69,8 @@ class Transcriber:
             TranscriptionError: If transcription fails for any reason.
         """
         if not audio_path.exists():
-            raise TranscriptionError(f"Audio file not found: {audio_path}")
+            logger.error("Audio file not found: %s", audio_path)
+            raise TranscriptionError("Audio file not found")
 
         file_size = audio_path.stat().st_size
         logger.info(
@@ -113,8 +114,8 @@ class Transcriber:
             raise TranscriptionError("Request timed out", e) from e
 
         except Exception as e:
-            logger.error("Unexpected error during transcription: %s", e)
-            raise TranscriptionError(f"Transcription failed: {e}", e) from e
+            logger.error("Unexpected error during transcription: %s", e, exc_info=True)
+            raise TranscriptionError("Transcription failed unexpectedly", e) from e
 
 
 if __name__ == "__main__":

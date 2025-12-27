@@ -272,8 +272,11 @@ class WhisperDictationApp(rumps.App):
             audio_path.unlink(missing_ok=True)
 
         except Exception as e:
-            logger.error("Unexpected error during transcription: %s", e)
-            self._output.show_notification("Error", str(e))
+            # Log full error for debugging, but show sanitized message to user
+            logger.error("Unexpected error during transcription: %s", e, exc_info=True)
+            self._output.show_notification(
+                "Error", "An unexpected error occurred. Please try again."
+            )
             audio_path.unlink(missing_ok=True)
 
         finally:

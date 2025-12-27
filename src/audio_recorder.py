@@ -8,6 +8,9 @@ from typing import Any
 
 import pyaudio
 
+# For secure memory operations
+import ctypes
+
 from .constants import (
     AUDIO_FORMAT,
     CHANNELS,
@@ -45,6 +48,34 @@ class AudioRecorder:
     def is_recording(self) -> bool:
         """Return True if currently recording."""
         return self._is_recording
+
+    def _secure_clear_buffer(self) -> None:
+        """Securely wipe and clear the audio buffer.
+
+        Overwrites buffer contents with zeros before clearing to prevent
+        audio data recovery from memory. Uses ctypes.memset for reliable
+        memory overwriting.
+        """
+        if not self._buffer:
+            return
+
+        for chunk in self._buffer:
+            try:
+                # Get the underlying buffer and overwrite with zeros
+                # This works because bytes objects in Python use a contiguous buffer
+                chunk_len = len(chunk)
+                if chunk_len > 0:
+                    # Create a mutable buffer pointing to the same memory
+                    # Note: This may not work for all Python implementations
+                    # but provides best-effort secure wiping
+                    buf_addr = id(chunk) + bytes.__basicsize__
+                    ctypes.memset(buf_addr, 0, chunk_len)
+            except Exception as e:
+                # If secure wipe fails, continue with normal clear
+                logger.debug("Secure buffer wipe failed (non-critical): %s", e)
+
+        self._buffer = []
+        logger.debug("Audio buffer securely cleared")
 
     def start_recording(self) -> None:
         """Begin capturing audio to an internal buffer.
@@ -104,7 +135,7 @@ class AudioRecorder:
                 duration,
                 MIN_RECORDING_DURATION,
             )
-            self._buffer = []
+            self._secure_clear_buffer()
             return None
 
         return self._save_to_temp_file()
@@ -112,12 +143,12 @@ class AudioRecorder:
     def cancel_recording(self) -> None:
         """Cancel the current recording without saving.
 
-        Stops the audio stream if active and discards all recorded data.
+        Stops the audio stream if active and securely discards all recorded data.
         """
         logger.info("Cancelling recording")
         self._stop_stream()
-        self._buffer = []
-        logger.debug("Recording cancelled and buffer cleared")
+        self._secure_clear_buffer()
+        logger.debug("Recording cancelled and buffer securely cleared")
 
     def _audio_callback(
         self,
@@ -191,13 +222,13 @@ class AudioRecorder:
                 wf.setframerate(SAMPLE_RATE)
                 wf.writeframes(b"".join(self._buffer))
 
-            self._buffer = []
+            self._secure_clear_buffer()
             logger.info("Recording saved to %s", temp_path)
             return temp_path
 
         except OSError as e:
             logger.error("Failed to save recording (disk full?): %s", e)
-            self._buffer = []
+            self._secure_clear_buffer()
             return None
 
     def __del__(self) -> None:

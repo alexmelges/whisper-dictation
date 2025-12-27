@@ -1,6 +1,12 @@
-rumps>=0.4.0
-pyaudio>=0.2.13
-openai>=1.0.0
-pynput>=1.7.6
-pyperclip>=1.8.2
-py2app>=0.28.0
+# Core dependencies - pinned for reproducible builds
+rumps==0.4.0
+PyAudio==0.2.14
+openai==2.14.0
+pynput==1.8.1
+pyperclip==1.11.0
+
+# Build dependencies
+py2app==0.28.9
+
+# Icon generation (optional, for development)
+Pillow>=10.0.0
