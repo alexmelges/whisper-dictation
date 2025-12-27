@@ -2,9 +2,12 @@
 
 import logging
 from collections.abc import Callable
-from typing import Union
+from typing import Any, Union
 
 from pynput.keyboard import Key, KeyCode, Listener
+
+# macOS keycode for space bar
+_SPACE_KEYCODE = 49
 
 from .constants import DEFAULT_HOTKEY
 
@@ -92,6 +95,8 @@ class HotkeyManager:
         self._listener = Listener(
             on_press=self._on_press,
             on_release=self._on_release,
+            suppress=True,
+            darwin_intercept=self._intercept_event,
         )
         self._listener.start()
         logger.debug("Keyboard listener started")
@@ -134,6 +139,36 @@ class HotkeyManager:
         if isinstance(key, Key) and key in _KEY_NORMALIZATIONS:
             return _KEY_NORMALIZATIONS[key]
         return key
+
+    def _intercept_event(self, event_type: int, event: Any) -> Any | None:
+        """Intercept keyboard events and suppress hotkey keys during recording.
+
+        This prevents the space character from being typed into the active
+        application while holding Option+Space to record.
+
+        Args:
+            event_type: The type of keyboard event.
+            event: The raw CGEvent from macOS.
+
+        Returns:
+            None to suppress the event, or the event to allow it through.
+        """
+        # Only suppress when recording is active
+        if not self._is_recording:
+            return event
+
+        # Suppress space key while recording to prevent typing spaces
+        try:
+            from Quartz import CGEventGetIntegerValueField, kCGKeyboardEventKeycode
+
+            keycode = CGEventGetIntegerValueField(event, kCGKeyboardEventKeycode)
+            if keycode == _SPACE_KEYCODE:
+                return None  # Suppress space
+        except Exception:
+            # If Quartz import fails, allow event through
+            pass
+
+        return event
 
     def _on_press(self, key: Union[Key, KeyCode]) -> None:
         """Handle a key press event.
