@@ -71,6 +71,11 @@ rm -rf build dist
 echo_info "Building Whisper Dictation..."
 python setup.py py2app
 
+# Remove quarantine and ad-hoc sign the app
+echo_info "Signing the app..."
+xattr -cr "dist/Whisper Dictation.app"
+codesign --force --deep --sign - "dist/Whisper Dictation.app"
+
 echo ""
 echo "========================================"
 echo -e "${GREEN}Build complete!${NC}"
@@ -84,6 +89,7 @@ echo "  open 'dist/Whisper Dictation.app'"
 echo ""
 echo "To install (copy to Applications):"
 echo "  cp -r 'dist/Whisper Dictation.app' /Applications/"
+echo "  codesign --force --deep --sign - '/Applications/Whisper Dictation.app'"
 echo ""
 echo "========================================"
 echo "IMPORTANT: First-time setup"
