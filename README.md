@@ -72,7 +72,19 @@ python run.py
 
 ## Building Standalone App
 
-To build a standalone macOS app:
+### Option 1: Build and Install (Recommended)
+
+Build, install to Applications, and sign in one step:
+
+```bash
+./build.sh install
+```
+
+The app will be installed to `/Applications/Whisper Dictation.app` and ready to use.
+
+### Option 2: Build Only
+
+Build without installing:
 
 ```bash
 ./build.sh
@@ -80,10 +92,21 @@ To build a standalone macOS app:
 
 The app will be created at `dist/Whisper Dictation.app`.
 
-To install:
+To install manually, you **must** copy and re-sign (copying invalidates the code signature):
 
 ```bash
 cp -r 'dist/Whisper Dictation.app' /Applications/
+codesign --force --deep --sign - '/Applications/Whisper Dictation.app'
+```
+
+> **Note**: If you skip the `codesign` step after copying, the app will fail to launch silently due to macOS code signature validation.
+
+### Clean Build
+
+To remove build artifacts:
+
+```bash
+./build.sh clean
 ```
 
 ## Configuration
@@ -117,6 +140,16 @@ Set the `OPENAI_API_KEY` environment variable before running the app.
 ### Hotkeys not working
 
 Go to System Settings > Privacy & Security > Accessibility and enable access for Terminal or the app.
+
+### App doesn't launch (no error)
+
+If the app fails to launch silently after copying to Applications, run:
+
+```bash
+codesign --force --deep --sign - '/Applications/Whisper Dictation.app'
+```
+
+This re-signs the app after copying, which is required because copying invalidates the code signature.
 
 ### "Rate limited"
 
