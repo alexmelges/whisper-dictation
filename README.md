@@ -48,10 +48,23 @@ export OPENAI_API_KEY='your-api-key-here'
 
 You can get an API key from: https://platform.openai.com/api-keys
 
-### 4. Run the App
+### 4. Start the App
+
+Start as a background service (recommended):
 
 ```bash
-python run.py
+./whisper-ctl.sh start
+```
+
+The menu bar icon will appear. The app auto-starts at login and runs in the background.
+
+**Other commands:**
+```bash
+./whisper-ctl.sh stop     # Stop the service
+./whisper-ctl.sh restart  # Restart the service
+./whisper-ctl.sh status   # Check if running
+./whisper-ctl.sh logs     # View log output
+./whisper-ctl.sh run      # Run interactively (for debugging)
 ```
 
 ## Usage
@@ -70,43 +83,25 @@ python run.py
 - **Recent**: View and copy recent transcriptions
 - **Quit**: Exit the application
 
-## Building Standalone App
+## Alternative: Standalone .app Bundle
 
-### Option 1: Build and Install (Recommended)
+> **Note**: The recommended method is `./whisper-ctl.sh start` (see Installation above).
+> The standalone app has code signing complexities that may cause launch failures.
 
-Build, install to Applications, and sign in one step:
+To build a standalone macOS .app:
 
 ```bash
 ./build.sh install
 ```
 
-The app will be installed to `/Applications/Whisper Dictation.app` and ready to use.
+This builds and installs to `/Applications/Whisper Dictation.app`.
 
-### Option 2: Build Only
-
-Build without installing:
-
+If you prefer to build only (without installing):
 ```bash
 ./build.sh
-```
-
-The app will be created at `dist/Whisper Dictation.app`.
-
-To install manually, you **must** copy and re-sign (copying invalidates the code signature):
-
-```bash
+# Then manually copy and re-sign:
 cp -r 'dist/Whisper Dictation.app' /Applications/
 codesign --force --deep --sign - '/Applications/Whisper Dictation.app'
-```
-
-> **Note**: If you skip the `codesign` step after copying, the app will fail to launch silently due to macOS code signature validation.
-
-### Clean Build
-
-To remove build artifacts:
-
-```bash
-./build.sh clean
 ```
 
 ## Configuration
@@ -141,15 +136,19 @@ Set the `OPENAI_API_KEY` environment variable before running the app.
 
 Go to System Settings > Privacy & Security > Accessibility and enable access for Terminal or the app.
 
-### App doesn't launch (no error)
+### App doesn't start
 
-If the app fails to launch silently after copying to Applications, run:
+Check the status and logs:
 
+```bash
+./whisper-ctl.sh status
+./whisper-ctl.sh logs
+```
+
+If using the standalone .app and it fails to launch, re-sign it:
 ```bash
 codesign --force --deep --sign - '/Applications/Whisper Dictation.app'
 ```
-
-This re-signs the app after copying, which is required because copying invalidates the code signature.
 
 ### "Rate limited"
 
@@ -157,11 +156,16 @@ You've exceeded OpenAI's rate limits. Wait a moment and try again.
 
 ## Debug Mode
 
-For verbose logging:
+For verbose logging, run interactively:
 
 ```bash
 export WHISPER_DICTATION_DEBUG=1
-python run.py
+./whisper-ctl.sh run
+```
+
+Or check the log file:
+```bash
+./whisper-ctl.sh logs
 ```
 
 ## License
