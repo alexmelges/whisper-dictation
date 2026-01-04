@@ -19,6 +19,7 @@ PLIST_NAME="com.whisper.dictation"
 PLIST_PATH="$HOME/Library/LaunchAgents/$PLIST_NAME.plist"
 LOG_FILE="$HOME/Library/Logs/WhisperDictation.log"
 VENV_PYTHON="$SCRIPT_DIR/venv/bin/python"
+LAUNCHER_SCRIPT="$SCRIPT_DIR/.whisper-launcher.sh"
 
 # Colors
 RED='\033[0;31m'
@@ -49,9 +50,50 @@ check_prereqs() {
     fi
 }
 
+# Create launcher script that sources shell profile for API key
+create_launcher() {
+    cat > "$LAUNCHER_SCRIPT" << 'LAUNCHER_EOF'
+#!/bin/bash
+# Whisper Dictation Launcher
+# This script sources shell profile to get OPENAI_API_KEY, then runs the app.
+
+# Source shell profile to get environment variables
+if [ -f "$HOME/.zshrc" ]; then
+    source "$HOME/.zshrc" 2>/dev/null || true
+elif [ -f "$HOME/.bashrc" ]; then
+    source "$HOME/.bashrc" 2>/dev/null || true
+elif [ -f "$HOME/.bash_profile" ]; then
+    source "$HOME/.bash_profile" 2>/dev/null || true
+fi
+
+# Also check for .env file in the script directory
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+if [ -f "$SCRIPT_DIR/.env" ]; then
+    export $(grep -v '^#' "$SCRIPT_DIR/.env" | xargs) 2>/dev/null || true
+fi
+
+# Verify API key is set
+if [ -z "$OPENAI_API_KEY" ]; then
+    echo "ERROR: OPENAI_API_KEY not found in shell profile or .env file" >&2
+    echo "Please add to ~/.zshrc or ~/.bashrc:" >&2
+    echo "  export OPENAI_API_KEY='your-api-key-here'" >&2
+    exit 1
+fi
+
+# Run the app
+cd "$SCRIPT_DIR"
+exec "$SCRIPT_DIR/venv/bin/python" -m src.main
+LAUNCHER_EOF
+    chmod +x "$LAUNCHER_SCRIPT"
+    echo_info "Created launcher script at $LAUNCHER_SCRIPT"
+}
+
 # Create LaunchAgent plist
 create_plist() {
     mkdir -p "$HOME/Library/LaunchAgents"
+
+    # Create the launcher script that sources shell profile
+    create_launcher
 
     cat > "$PLIST_PATH" << EOF
 <?xml version="1.0" encoding="UTF-8"?>
@@ -62,18 +104,16 @@ create_plist() {
     <string>$PLIST_NAME</string>
     <key>ProgramArguments</key>
     <array>
-        <string>$VENV_PYTHON</string>
-        <string>-m</string>
-        <string>src.main</string>
+        <string>$LAUNCHER_SCRIPT</string>
     </array>
     <key>WorkingDirectory</key>
     <string>$SCRIPT_DIR</string>
     <key>EnvironmentVariables</key>
     <dict>
-        <key>OPENAI_API_KEY</key>
-        <string>$OPENAI_API_KEY</string>
+        <key>HOME</key>
+        <string>$HOME</string>
         <key>PATH</key>
-        <string>/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+        <string>/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
     </dict>
     <key>KeepAlive</key>
     <true/>
@@ -119,6 +159,7 @@ cmd_stop() {
 
     launchctl unload "$PLIST_PATH" 2>/dev/null || true
     rm -f "$PLIST_PATH"
+    rm -f "$LAUNCHER_SCRIPT"
     echo_info "Whisper Dictation stopped"
 }
 

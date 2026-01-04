@@ -173,6 +173,18 @@ class OutputHandler:
         except Exception as e:
             logger.error("Failed to save recent transcription: %s", e)
 
+    def cleanup(self) -> None:
+        """Clean up resources, cancelling any pending timers.
+
+        Should be called when the application is shutting down.
+        """
+        logger.debug("Cleaning up OutputHandler")
+        with self._clipboard_lock:
+            if self._clipboard_timer is not None:
+                self._clipboard_timer.cancel()
+                self._clipboard_timer = None
+                logger.debug("Clipboard timer cancelled")
+
 
 if __name__ == "__main__":
     logging.basicConfig(

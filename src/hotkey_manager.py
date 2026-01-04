@@ -1,6 +1,7 @@
 """Global hotkey detection for recording control."""
 
 import logging
+import threading
 from collections.abc import Callable
 from typing import Any, Union
 
@@ -59,6 +60,8 @@ class HotkeyManager:
         self._on_cancel = on_cancel or (lambda: None)
         self._hotkey = hotkey if hotkey is not None else DEFAULT_HOTKEY
 
+        # Thread lock for protecting state
+        self._lock = threading.RLock()
         self._pressed_keys: set[Union[Key, KeyCode]] = set()
         self._is_recording: bool = False
         self._listener: Listener | None = None
@@ -75,8 +78,9 @@ class HotkeyManager:
 
     @property
     def is_recording(self) -> bool:
-        """Return True if currently in recording state."""
-        return self._is_recording
+        """Return True if currently in recording state (thread-safe)."""
+        with self._lock:
+            return self._is_recording
 
     def start_listening(self) -> None:
         """Start the keyboard listener in a background thread.
@@ -89,8 +93,9 @@ class HotkeyManager:
             return
 
         logger.info("Starting keyboard listener")
-        self._pressed_keys.clear()
-        self._is_recording = False
+        with self._lock:
+            self._pressed_keys.clear()
+            self._is_recording = False
 
         self._listener = Listener(
             on_press=self._on_press,
@@ -111,8 +116,16 @@ class HotkeyManager:
 
         logger.info("Stopping keyboard listener")
 
-        if self._is_recording:
-            self._is_recording = False
+        # Check recording state and prepare callback outside lock
+        should_stop_recording = False
+        with self._lock:
+            if self._is_recording:
+                self._is_recording = False
+                should_stop_recording = True
+            self._pressed_keys.clear()
+
+        # Execute callback outside lock to prevent deadlocks
+        if should_stop_recording:
             try:
                 self._on_record_stop()
             except Exception as e:
@@ -121,7 +134,6 @@ class HotkeyManager:
         self._listener.stop()
         self._listener.join(timeout=1.0)
         self._listener = None
-        self._pressed_keys.clear()
         logger.debug("Keyboard listener stopped")
 
     def _normalize_key(self, key: Union[Key, KeyCode]) -> Union[Key, KeyCode]:
@@ -153,8 +165,10 @@ class HotkeyManager:
         Returns:
             None to suppress the event, or the event to allow it through.
         """
-        # Only suppress when recording is active
-        if not self._is_recording:
+        # Only suppress when recording is active (thread-safe check)
+        with self._lock:
+            is_recording = self._is_recording
+        if not is_recording:
             return event
 
         # Suppress space key while recording to prevent typing spaces
@@ -177,33 +191,40 @@ class HotkeyManager:
             key: The key that was pressed.
         """
         normalized = self._normalize_key(key)
+        callback_to_call = None
 
-        # Ignore key repeat (key already pressed)
-        if normalized in self._pressed_keys:
-            return
+        with self._lock:
+            # Ignore key repeat (key already pressed)
+            if normalized in self._pressed_keys:
+                return
 
-        self._pressed_keys.add(normalized)
-        logger.debug("Key pressed: %s (normalized: %s)", key, normalized)
+            self._pressed_keys.add(normalized)
+            logger.debug("Key pressed: %s (normalized: %s)", key, normalized)
 
-        # Check for cancel (ESC during recording)
-        if self._is_recording and key == Key.esc:
-            logger.info("Recording cancelled via ESC")
-            self._is_recording = False
+            # Check for cancel (ESC during recording)
+            if self._is_recording and key == Key.esc:
+                logger.info("Recording cancelled via ESC")
+                self._is_recording = False
+                callback_to_call = "cancel"
+            # Check if hotkey combination is complete
+            elif not self._is_recording and self._hotkey.issubset(self._pressed_keys):
+                logger.info("Hotkey activated, starting recording")
+                self._is_recording = True
+                callback_to_call = "start"
+
+        # Execute callbacks outside lock to prevent deadlocks
+        if callback_to_call == "cancel":
             try:
                 self._on_cancel()
             except Exception as e:
                 logger.error("Error in on_cancel callback: %s", e)
-            return
-
-        # Check if hotkey combination is complete
-        if not self._is_recording and self._hotkey.issubset(self._pressed_keys):
-            logger.info("Hotkey activated, starting recording")
-            self._is_recording = True
+        elif callback_to_call == "start":
             try:
                 self._on_record_start()
             except Exception as e:
                 logger.error("Error in on_record_start callback: %s", e)
-                self._is_recording = False
+                with self._lock:
+                    self._is_recording = False
 
     def _on_release(self, key: Union[Key, KeyCode]) -> None:
         """Handle a key release event.
@@ -214,16 +235,22 @@ class HotkeyManager:
         normalized = self._normalize_key(key)
         logger.debug("Key released: %s (normalized: %s)", key, normalized)
 
-        # If recording and released a hotkey key, stop recording
-        if self._is_recording and normalized in self._hotkey:
-            logger.info("Hotkey released, stopping recording")
-            self._is_recording = False
+        should_stop_recording = False
+        with self._lock:
+            # If recording and released a hotkey key, stop recording
+            if self._is_recording and normalized in self._hotkey:
+                logger.info("Hotkey released, stopping recording")
+                self._is_recording = False
+                should_stop_recording = True
+
+            self._pressed_keys.discard(normalized)
+
+        # Execute callback outside lock to prevent deadlocks
+        if should_stop_recording:
             try:
                 self._on_record_stop()
             except Exception as e:
                 logger.error("Error in on_record_stop callback: %s", e)
-
-        self._pressed_keys.discard(normalized)
 
 
 if __name__ == "__main__":

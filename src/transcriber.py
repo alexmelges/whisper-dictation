@@ -90,11 +90,6 @@ class Transcriber:
 
             text = response.text
             logger.info("Transcription successful: %d characters", len(text))
-
-            # Delete the audio file after successful transcription
-            audio_path.unlink(missing_ok=True)
-            logger.debug("Deleted audio file: %s", audio_path)
-
             return text
 
         except AuthenticationError as e:
@@ -116,6 +111,14 @@ class Transcriber:
         except Exception as e:
             logger.error("Unexpected error during transcription: %s", e, exc_info=True)
             raise TranscriptionError("Transcription failed unexpectedly", e) from e
+
+        finally:
+            # Always delete the audio file to prevent leaks
+            try:
+                audio_path.unlink(missing_ok=True)
+                logger.debug("Deleted audio file: %s", audio_path)
+            except Exception as e:
+                logger.warning("Failed to delete audio file %s: %s", audio_path, e)
 
 
 if __name__ == "__main__":

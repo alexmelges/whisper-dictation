@@ -2,19 +2,19 @@
 
 import logging
 import tempfile
+import threading
 import wave
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
 import pyaudio
 
-# For secure memory operations
-import ctypes
-
 from .constants import (
     AUDIO_FORMAT,
     CHANNELS,
     CHUNK_SIZE,
+    MAX_RECORDING_DURATION,
     MIN_RECORDING_DURATION,
     SAMPLE_RATE,
 )
@@ -32,8 +32,15 @@ class AudioRecorder:
         is_recording: True if currently recording audio.
     """
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        on_max_duration: Callable[[], None] | None = None,
+    ) -> None:
         """Initialize the audio recorder.
+
+        Args:
+            on_max_duration: Optional callback when max recording duration is reached.
+                           This callback will be called from a timer thread.
 
         Creates a PyAudio instance for managing audio streams.
         """
@@ -42,72 +49,98 @@ class AudioRecorder:
         self._stream: pyaudio.Stream | None = None
         self._buffer: list[bytes] = []
         self._is_recording: bool = False
+        self._on_max_duration = on_max_duration
+        self._max_duration_timer: threading.Timer | None = None
+        self._lock = threading.Lock()
         logger.info("AudioRecorder initialized")
 
     @property
     def is_recording(self) -> bool:
-        """Return True if currently recording."""
-        return self._is_recording
+        """Return True if currently recording (thread-safe)."""
+        with self._lock:
+            return self._is_recording
 
-    def _secure_clear_buffer(self) -> None:
-        """Securely wipe and clear the audio buffer.
+    def _start_max_duration_timer(self) -> None:
+        """Start timer to auto-stop recording after MAX_RECORDING_DURATION."""
+        self._cancel_max_duration_timer()
+        self._max_duration_timer = threading.Timer(
+            MAX_RECORDING_DURATION,
+            self._on_max_duration_reached,
+        )
+        self._max_duration_timer.daemon = True
+        self._max_duration_timer.start()
+        logger.debug(
+            "Max duration timer started (%.0fs)", MAX_RECORDING_DURATION
+        )
 
-        Overwrites buffer contents with zeros before clearing to prevent
-        audio data recovery from memory. Uses ctypes.memset for reliable
-        memory overwriting.
-        """
-        if not self._buffer:
-            return
+    def _cancel_max_duration_timer(self) -> None:
+        """Cancel the max duration timer if active."""
+        if self._max_duration_timer is not None:
+            self._max_duration_timer.cancel()
+            self._max_duration_timer = None
+            logger.debug("Max duration timer cancelled")
 
-        for chunk in self._buffer:
+    def _on_max_duration_reached(self) -> None:
+        """Handle max recording duration being reached."""
+        with self._lock:
+            if not self._is_recording:
+                return  # Already stopped
+
+        logger.warning(
+            "Max recording duration (%.0fs) reached, auto-stopping",
+            MAX_RECORDING_DURATION,
+        )
+        if self._on_max_duration:
             try:
-                # Get the underlying buffer and overwrite with zeros
-                # This works because bytes objects in Python use a contiguous buffer
-                chunk_len = len(chunk)
-                if chunk_len > 0:
-                    # Create a mutable buffer pointing to the same memory
-                    # Note: This may not work for all Python implementations
-                    # but provides best-effort secure wiping
-                    buf_addr = id(chunk) + bytes.__basicsize__
-                    ctypes.memset(buf_addr, 0, chunk_len)
+                self._on_max_duration()
             except Exception as e:
-                # If secure wipe fails, continue with normal clear
-                logger.debug("Secure buffer wipe failed (non-critical): %s", e)
+                logger.error("Error in on_max_duration callback: %s", e)
 
+    def _clear_buffer(self) -> None:
+        """Clear the audio buffer.
+
+        Simply clears the buffer list. Python's garbage collector
+        will handle memory cleanup.
+        """
         self._buffer = []
-        logger.debug("Audio buffer securely cleared")
+        logger.debug("Audio buffer cleared")
 
     def start_recording(self) -> None:
         """Begin capturing audio to an internal buffer.
 
         Opens an audio stream with the configured parameters and starts
-        capturing audio data via callback.
+        capturing audio data via callback. Also starts a timer to auto-stop
+        if MAX_RECORDING_DURATION is exceeded.
 
         Raises:
             RuntimeError: If already recording.
             OSError: If microphone is not available or permission denied.
         """
-        if self._is_recording:
-            raise RuntimeError("Already recording")
+        with self._lock:
+            if self._is_recording:
+                raise RuntimeError("Already recording")
 
-        logger.info("Starting recording")
-        self._buffer = []
+            logger.info("Starting recording")
+            self._buffer = []
 
-        try:
-            self._stream = self._pyaudio.open(
-                format=AUDIO_FORMAT,
-                channels=CHANNELS,
-                rate=SAMPLE_RATE,
-                input=True,
-                frames_per_buffer=CHUNK_SIZE,
-                stream_callback=self._audio_callback,
-            )
-            self._stream.start_stream()
-            self._is_recording = True
-            logger.debug("Recording stream started")
-        except OSError as e:
-            logger.error("Failed to start recording: %s", e)
-            raise OSError(f"Failed to access microphone: {e}") from e
+            try:
+                self._stream = self._pyaudio.open(
+                    format=AUDIO_FORMAT,
+                    channels=CHANNELS,
+                    rate=SAMPLE_RATE,
+                    input=True,
+                    frames_per_buffer=CHUNK_SIZE,
+                    stream_callback=self._audio_callback,
+                )
+                self._stream.start_stream()
+                self._is_recording = True
+                logger.debug("Recording stream started")
+            except OSError as e:
+                logger.error("Failed to start recording: %s", e)
+                raise OSError(f"Failed to access microphone: {e}") from e
+
+        # Start timer outside lock to avoid holding lock during timer setup
+        self._start_max_duration_timer()
 
     def stop_recording(self) -> Path | None:
         """Stop recording and save audio to a temporary WAV file.
@@ -119,9 +152,13 @@ class AudioRecorder:
             Path to the temporary WAV file, or None if the recording was
             too short (less than MIN_RECORDING_DURATION seconds).
         """
-        if not self._is_recording:
-            logger.warning("stop_recording called but not recording")
-            return None
+        # Cancel timer first
+        self._cancel_max_duration_timer()
+
+        with self._lock:
+            if not self._is_recording:
+                logger.warning("stop_recording called but not recording")
+                return None
 
         logger.info("Stopping recording")
         self._stop_stream()
@@ -135,7 +172,7 @@ class AudioRecorder:
                 duration,
                 MIN_RECORDING_DURATION,
             )
-            self._secure_clear_buffer()
+            self._clear_buffer()
             return None
 
         return self._save_to_temp_file()
@@ -143,12 +180,15 @@ class AudioRecorder:
     def cancel_recording(self) -> None:
         """Cancel the current recording without saving.
 
-        Stops the audio stream if active and securely discards all recorded data.
+        Stops the audio stream if active and discards all recorded data.
         """
+        # Cancel timer first
+        self._cancel_max_duration_timer()
+
         logger.info("Cancelling recording")
         self._stop_stream()
-        self._secure_clear_buffer()
-        logger.debug("Recording cancelled and buffer securely cleared")
+        self._clear_buffer()
+        logger.debug("Recording cancelled and buffer cleared")
 
     def _audio_callback(
         self,
@@ -173,17 +213,18 @@ class AudioRecorder:
         return (None, pyaudio.paContinue)
 
     def _stop_stream(self) -> None:
-        """Stop and close the audio stream."""
-        if self._stream is not None:
-            try:
-                if self._stream.is_active():
-                    self._stream.stop_stream()
-                self._stream.close()
-            except OSError as e:
-                logger.error("Error closing stream: %s", e)
-            finally:
-                self._stream = None
-                self._is_recording = False
+        """Stop and close the audio stream (thread-safe)."""
+        with self._lock:
+            if self._stream is not None:
+                try:
+                    if self._stream.is_active():
+                        self._stream.stop_stream()
+                    self._stream.close()
+                except OSError as e:
+                    logger.error("Error closing stream: %s", e)
+                finally:
+                    self._stream = None
+                    self._is_recording = False
 
     def _calculate_duration(self) -> float:
         """Calculate the duration of the recorded audio in seconds.
@@ -222,18 +263,19 @@ class AudioRecorder:
                 wf.setframerate(SAMPLE_RATE)
                 wf.writeframes(b"".join(self._buffer))
 
-            self._secure_clear_buffer()
+            self._clear_buffer()
             logger.info("Recording saved to %s", temp_path)
             return temp_path
 
         except OSError as e:
             logger.error("Failed to save recording (disk full?): %s", e)
-            self._secure_clear_buffer()
+            self._clear_buffer()
             return None
 
     def __del__(self) -> None:
         """Clean up pyaudio resources."""
         logger.debug("Cleaning up AudioRecorder")
+        self._cancel_max_duration_timer()
         self._stop_stream()
 
         if hasattr(self, "_pyaudio") and self._pyaudio is not None:
